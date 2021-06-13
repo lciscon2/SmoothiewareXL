@@ -17,6 +17,11 @@
 #define zprobe_checksum            CHECKSUM("zprobe")
 #define leveling_strategy_checksum CHECKSUM("leveling-strategy")
 
+#define SENSOR_STATE_OFF        0
+#define SENSOR_STATE_ON         1
+#define SENSOR_STATE_CALIBRATE  2
+#define SENSOR_STATE_DEBUG      3
+
 class StepperMotor;
 class Gcode;
 class StreamOutput;
@@ -36,8 +41,24 @@ public:
     bool run_probe_return(float& mm, float feedrate, float max_dist= -1, bool reverse= false);
     bool doProbeAt(float &mm, float x, float y);
 
-    void coordinated_move(float x, float y, float z, float feedrate, bool relative=false);
+    void coordinated_move(float x, float y, float z, float feedrate, bool relative=false, bool toolcoord=false);
     void home();
+
+    void set_sensor_state(Gcode *gcode, int mode);
+    void reset_sensor_state();
+    void set_active_tool(Gcode *gcode, int tnum);
+    void set_active_probe(int pnum);
+	void wait(int sec);
+    float get_tool_temperature(int toolnum);
+    void set_sensor_position(Gcode *gcode, int toolnum, int pos);
+	void set_sensor_position(Gcode *gcode, int toolnum, int pos, bool checkprobe);
+	void set_sensor_position_new(Gcode *gcode, int toolnum, int pos, bool checkprobe);
+	void set_sensor_position_old(Gcode *gcode, int toolnum, int pos, bool checkprobe);
+
+	bool check_probe_state(bool check1, bool check2);
+	void clear_cam(Gcode *gcode);
+	void move_cam(Gcode *gcode, float angle);
+	void init_cam(Gcode *gcode);
 
     bool getProbeStatus() { return this->pin.get(); }
     float getSlowFeedrate() const { return slow_feedrate; }
@@ -45,21 +66,57 @@ public:
     float getProbeHeight() const { return probe_height; }
     float getMaxZ() const { return max_z; }
 
+
 private:
     void config_load();
-    void probe_XYZ(Gcode *gc);
+    void probe_XYZ(Gcode *gc, float x, float y, float z);
     uint32_t read_probe(uint32_t dummy);
+    void store_delta();
 
     float slow_feedrate;
     float fast_feedrate;
     float return_feedrate;
     float probe_height;
     float max_z;
+    float home_offset;
+    float home_offset2;
+    float x_pos_0;
+    float y_pos_0;
+	float x_pos_1;
+    float y_pos_1;
+
+	float mount_turns_mm;
+	float mount_pos1[2];
+	float mount_pos2[2];
+	float mount_pos3[2];
+
     float dwell_before_probing;
+    float probe_up_val;
+    float probe_down_val;
+    float probe2_up_val;
+    float probe2_down_val;
+	bool disable_check_probe;
 
     Pin pin;
+    Pin pin2;
+    Pin active_pin;
+    int active_tool;
+    float tool_delta;
+    Pin calibrate_pin;
+    Pin sensor_on_pin;
     std::vector<LevelingStrategy*> strategies;
     uint16_t debounce_ms, debounce;
+    int sensor_mode;
+
+	Pin *cam_pin;
+	float cam_steps_degree;
+	float cam_speed;
+	float cam_angle_offset;
+	float cam_position;
+	float cam_tool0;
+	float cam_tool1;
+	float cam_neutral;
+
 
     volatile struct {
         bool is_delta:1;

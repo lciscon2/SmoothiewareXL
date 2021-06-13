@@ -175,7 +175,7 @@ bool CartGridStrategy::handleConfig()
     }
 
     // the initial height above the bed we stop the intial move down after home to find the bed
-    // this should be a height that is enough that the probe will not hit the bed and is the actual z machine  position to move to
+    // this should be a height that is enough that the probe will not hit the bed and is an offset from max_z (can be set to 0 if max_z takes into account the probe offset)
     this->initial_height = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, initial_height_checksum)->by_default(NAN)->as_number();
     if(initial_height <= 0) initial_height= NAN;
 
@@ -386,19 +386,22 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             if(!before_probe.empty()) {
                 Gcode gc(before_probe, &(StreamOutput::NullStream));
                 THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
-                THEKERNEL->conveyor->wait_for_idle();
             }
 
             THEROBOT->disable_segmentation= true;
-            if(!doProbe(gcode)) {
+			bool probe_result = doProbe(gcode);
+
+            if(!probe_result) {
                 gcode->stream->printf("Probe failed to complete, check the initial probe height and/or initial_height settings\n");
+				gcode->stream->printf("//action:error Grid probe failure.  Check the sensor.\n");
             } else {
-                gcode->stream->printf("Probe completed.");
+				gcode->stream->printf("Probe completed.");
                 if(!only_by_two_corners) {
                     gcode->stream->printf(" Enter M374 to save this grid\n");
                 }else{
                     gcode->stream->printf("\n");
                 }
+				gcode->stream->printf("//action:gridcomplete\n");
             }
             THEROBOT->disable_segmentation= false;
 
@@ -413,9 +416,15 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             // first wait for an empty queue i.e. no moves left
             THEKERNEL->conveyor->wait_for_idle();
 
+            // home if needed
+//            if (do_home && !only_by_two_corners && !(gcode->has_letter('R') && gcode->get_int('R') == 1)){
+//                zprobe->home();
+//            }
+
             if(!before_probe.empty()) {
                 Gcode gc(before_probe, &(StreamOutput::NullStream));
                 THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+				THEKERNEL->conveyor->wait_for_idle();
             }
 
             if(!scan_bed(gcode)) {
@@ -447,6 +456,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
                 __disable_irq();
                 save_grid(gcode->stream);
                 __enable_irq();
+                gcode->stream->printf("//action:gridsave\n");
             }
 
             return true;
@@ -454,17 +464,23 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
         } else if(gcode->m == 375) { // M375: load grid, M375.1 display grid
             if(gcode->subcode == 1) {
                 print_bed_level(gcode->stream);
-                if(THEROBOT->compensationTransform == nullptr){
-                    gcode->stream->printf("Grid is currently disabled\n");
-                }else{
-                    gcode->stream->printf("Grid is currently enabled\n");
-                }
             } else {
-                __disable_irq();
+				__disable_irq();
                 if(load_grid(gcode->stream)) setAdjustFunction(true);
-                __enable_irq();
+				__enable_irq();
             }
             return true;
+
+       } else if(gcode->m == 376) { // M376: change the value of a point on the grid
+            int xCount = 0, yCount = 0;
+            float measured_z = 0;
+            if(gcode->has_letter('X')) xCount = gcode->get_value('X');
+            if(gcode->has_letter('Y')) yCount = gcode->get_value('Y');
+            if(gcode->has_letter('Z')) measured_z = gcode->get_value('Z');
+
+            grid[xCount + (this->current_grid_x_size * yCount)] = measured_z;
+            return true;
+
 
         } else if(gcode->m == 565) { // M565: Set Z probe offsets
             float x = 0, y = 0, z = 0;
@@ -598,9 +614,12 @@ bool CartGridStrategy::doProbe(Gcode *gc)
             if(use_wcs) {
                 float xo = gc->get_value('X'); // offset current start position
                 float yo = gc->get_value('Y');
-                // NOTE we are positioning the head, in case there is a probe offset
-                this->x_start = THEROBOT->get_axis_position(X_AXIS) + xo;
-                this->y_start = THEROBOT->get_axis_position(Y_AXIS) + yo;
+				// NOTE we are positioning the head, in case there is a probe offset
+			    this->x_start = THEROBOT->get_axis_position(X_AXIS) + xo;
+			    this->y_start = THEROBOT->get_axis_position(Y_AXIS) + yo;
+                // NOTE as we are positioning the probe we need to reverse offset for the probe offset
+                //this->x_start = THEROBOT->get_axis_position(X_AXIS) + xo + X_PROBE_OFFSET_FROM_EXTRUDER;
+                //this->y_start = THEROBOT->get_axis_position(Y_AXIS) + yo + Y_PROBE_OFFSET_FROM_EXTRUDER;
             }else{
                 this->x_start = gc->get_value('X'); // override default probe start point
                 this->y_start = gc->get_value('Y'); // override default probe start point
@@ -650,13 +669,17 @@ bool CartGridStrategy::doProbe(Gcode *gc)
         }
     }
 
+    zprobe->set_sensor_state(gc, SENSOR_STATE_ON);
+
     // find bed, and leave probe probe_height above bed
     if(!findBed(x_start, y_start)) {
         gc->stream->printf("Finding bed failed, check the initial height setting\n");
+        zprobe->set_sensor_state(gc, SENSOR_STATE_OFF);
         return false;
     }
 
     gc->stream->printf("Probe start ht: %0.3f mm, start MCS x,y: %0.3f,%0.3f, rectangular bed width,height in mm: %0.3f,%0.3f, grid size: %dx%d\n", zprobe->getProbeHeight(), x_start, y_start, x_size, y_size, current_grid_x_size, current_grid_y_size);
+    gc->stream->printf("Probe max ht: %0.3f mm\n", zprobe->getMaxZ());
 
     // do first probe at start point
     float mm;
@@ -685,6 +708,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
             float xProbe = this->x_start + (this->x_size / (this->current_grid_x_size - 1)) * xCount;
 
             if(!zprobe->doProbeAt(mm, xProbe - X_PROBE_OFFSET_FROM_EXTRUDER, yProbe - Y_PROBE_OFFSET_FROM_EXTRUDER)){
+              zprobe->set_sensor_state(gc, SENSOR_STATE_OFF);
                 return false;
             }
 
@@ -709,6 +733,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
     }
 
     setAdjustFunction(true);
+    zprobe->set_sensor_state(gc, SENSOR_STATE_OFF);
 
     return true;
 }

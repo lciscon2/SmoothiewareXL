@@ -426,8 +426,11 @@ void Endstops::on_idle(void*)
         THEKERNEL->streams->printf("ALARM: Hard limit %c%c\n", d, a);
         THEKERNEL->streams->printf("// NOTICE limits are disabled until all have been cleared\n");
 
+//      THEKERNEL->streams->printf("//action:cancel\n");
         // disables heaters and motors
         THEKERNEL->call_event(ON_HALT, nullptr);
+		//but don't keep us in halted mode...
+//      THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
 
     } else if(this->limits_activated) {
         this->limits_activated= false;

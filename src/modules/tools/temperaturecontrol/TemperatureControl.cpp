@@ -69,6 +69,8 @@
 #define runaway_cooling_timeout_checksum   CHECKSUM("runaway_cooling_timeout")
 #define runaway_error_range_checksum       CHECKSUM("runaway_error_range")
 
+#define tolerance_pct_checksum             CHECKSUM("tolerance_pct")
+
 TemperatureControl::TemperatureControl(uint16_t name, int index)
 {
     name_checksum= name;
@@ -159,6 +161,14 @@ void TemperatureControl::load_config()
     this->max_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, max_temp_checksum)->by_default(300)->as_number();
     this->min_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, min_temp_checksum)->by_default(0)->as_number();
 
+	float tpct = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, tolerance_pct_checksum)->by_default(0)->as_number();
+	    if (tpct > 99.0) {
+	      tpct = 99.0;
+	    } else if (tpct < 0.0) {
+	      tpct = 0.0;
+	    }
+	    this->tolerance_pct = tpct;
+
     // Heater pin
     this->heater_pin.from_string( THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, heater_pin_checksum)->by_default("nc")->as_string());
     if(this->heater_pin.connected()){
@@ -236,7 +246,12 @@ void TemperatureControl::on_gcode_received(void *argument)
 
         if( gcode->m == this->get_m_code ) {
             char buf[32]; // should be big enough for any status
-            int n = snprintf(buf, sizeof(buf), "%s:%3.1f /%3.1f @%d ", this->designator.c_str(), this->get_temperature(), ((target_temperature <= 0) ? 0.0 : target_temperature), this->o);
+			float curtemp = this->get_temperature();
+			//don't return infinite as a temperature.  octoprint doesn't process it correctly
+			if (isinf(curtemp)) {
+				curtemp = 0.0;
+			}
+            int n = snprintf(buf, sizeof(buf), "%s:%3.1f /%3.1f @%d ", this->designator.c_str(), curtemp, ((target_temperature <= 0) ? 0.0 : target_temperature), this->o);
             gcode->txt_after_ok.append(buf, n);
             return;
         }
@@ -329,11 +344,16 @@ void TemperatureControl::on_gcode_received(void *argument)
             // this is safe as old configs as well as single extruder configs the toolmanager will not be running so will return false
             // this will also ignore anything that the tool manager is not controlling and return false, otherwise it returns the active tool
             void *returned_data;
-            bool ok = PublicData::get_value( tool_manager_checksum, is_active_tool_checksum, this->name_checksum, &returned_data );
-            if (ok) {
-                uint16_t active_tool_name =  *static_cast<uint16_t *>(returned_data);
-                this->active = (active_tool_name == this->name_checksum);
-            }
+			if(gcode->has_letter('T')) {
+				int new_tool = gcode->get_value('T');
+				this->active = (this->pool_index == new_tool);
+			} else {
+	            bool ok = PublicData::get_value( tool_manager_checksum, is_active_tool_checksum, this->name_checksum, &returned_data );
+	            if (ok) {
+	                uint16_t active_tool_name =  *static_cast<uint16_t *>(returned_data);
+	                this->active = (active_tool_name == this->name_checksum);
+	            }
+			}
 
             if(this->active) {
                 // required so temp change happens in order
@@ -351,11 +371,18 @@ void TemperatureControl::on_gcode_received(void *argument)
                         if(isinf(get_temperature()) && isinf(sensor->get_temperature())) {
                             THEKERNEL->streams->printf("Temperature reading is unreliable on %s HALT asserted - reset or M999 required\n", designator.c_str());
                             THEKERNEL->call_event(ON_HALT, nullptr);
+							if (gcode->subcode == 1) {
+                              //ignore errors...just return
+                            } else {
+                              THEKERNEL->streams->printf("Temperature reading is unreliable on %s HALT asserted - reset or M999 required\n", designator.c_str());
+                              THEKERNEL->call_event(ON_HALT, nullptr);
+                            }
                             return;
                         }
 
+						float adj_target_temperature = this->target_temperature*((100-this->tolerance_pct)/100);
                         this->waiting = true; // on_second_tick will announce temps
-                        while ( get_temperature() < target_temperature ) {
+                        while ( get_temperature() < adj_target_temperature ) {
                             THEKERNEL->call_event(ON_IDLE, this);
                             // check if ON_HALT was called (usually by kill button)
                             if(THEKERNEL->is_halted() || this->target_temperature == UNDEFINED) {

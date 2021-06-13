@@ -44,7 +44,17 @@ void ToolManager::on_gcode_received(void *argument)
     Gcode *gcode = static_cast<Gcode*>(argument);
 
     if( gcode->has_letter('T') ) {
+			//filter out certain lines because they are not tool changes!!
+		if(gcode->has_m) {
+			if((gcode->m == 104 ) || ( gcode->m == 109 )) { // temperature settings
+		//			gcode->stream->printf("Skipping temp command\n");
+				return;
+			}
+		}
+
         int new_tool = gcode->get_value('T');
+		gcode->stream->printf("Toolmanager new tool: %d\n", new_tool);
+
         if(new_tool >= (int)this->tools.size() || new_tool < 0) {
             // invalid tool
             char buf[32]; // should be big enough for any status
@@ -62,10 +72,54 @@ void ToolManager::on_gcode_received(void *argument)
 
                 //send new_tool_offsets to robot
                 const float *new_tool_offset = tools[new_tool]->get_offset();
+				gcode->stream->printf("Tool offset: %f %f %f\n", new_tool_offset[0],new_tool_offset[1],new_tool_offset[2]);
                 THEROBOT->set_tool_offset(new_tool_offset);
             }
         }
-    }
+	} else if(gcode->has_m) {
+	// M code processing here
+
+	switch (gcode->m) {
+		case 676: //get current tool #
+			gcode->stream->printf("%d\n",active_tool);
+			break;
+
+		case 675: //set tool offsets
+			if(gcode->subcode == 1) {
+				const float *old_tool_offset = tools[1]->get_offset();
+				float newoff[3] = {old_tool_offset[0],old_tool_offset[1],0.0};
+				if (gcode->has_letter('X')) newoff[0] = gcode->get_value('X');
+				if (gcode->has_letter('Y')) newoff[1] = gcode->get_value('Y');
+				tools[1]->set_offset(0, newoff[0]);
+				tools[1]->set_offset(1, newoff[1]);
+				tools[1]->set_offset(2, newoff[2]);
+//				tools[1]->set_offset(newoff);
+			}
+			break;
+
+		case 500: // save settings
+		case 503: // print settings
+			{
+			//BUGBUG HACKHACK FIXFIX only shows tool offset for T1 right now
+			const float *old_tool_offset2 = tools[1]->get_offset();
+			gcode->stream->printf(";Tool offsets:\nM675.1 X%1.4f Y%1.4f\n",
+				old_tool_offset2[0],old_tool_offset2[1]);
+			}
+			break;
+
+		case 553:
+			{
+			const float *old_tool_offset4 = tools[0]->get_offset();
+			gcode->stream->printf(";T0 Tool offsets: X%1.4f Y%1.4f Z%1.4f\n",
+			old_tool_offset4[0],old_tool_offset4[1],old_tool_offset4[2]);
+			const float *old_tool_offset3 = tools[1]->get_offset();
+			gcode->stream->printf(";T1 Tool offsets: X%1.4f Y%1.4f Z%1.4f\n",
+				old_tool_offset3[0],old_tool_offset3[1],old_tool_offset3[2]);
+			}
+			break;
+		}
+	}
+
 
     if(gcode->has_g && gcode->g == 10 && gcode->has_letter('L') && gcode->get_int('L') == 1 && gcode->has_letter('P')) {
         // Handle G10 L1 Pn Xnnn Ynnn Znnn
@@ -111,7 +165,7 @@ void ToolManager::on_get_public_data(void* argument)
         pdr->set_data_ptr(&this->current_tool_name);
         pdr->set_taken();
 
-    }else if(pdr->second_element_is(get_active_tool_checksum)) {
+    } else if(pdr->second_element_is(get_active_tool_checksum)) {
         pdr->set_data_ptr(&this->active_tool);
         pdr->set_taken();
     }
@@ -122,6 +176,16 @@ void ToolManager::on_set_public_data(void* argument)
     PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
 
     if(!pdr->starts_with(tool_manager_checksum)) return;
+
+	if(pdr->second_element_is(set_offset_checksum)) {
+       float *info = static_cast<float *>(pdr->get_data_ptr());
+       int toolnum = info[0];
+       int axis = info[1];
+       float newoffset = info[2];
+
+       float *offset = this->tools[toolnum]->get_offset();
+       offset[axis] = newoffset;
+     }
 
     // ok this is targeted at us, so change tools
     //uint16_t tool_name= *static_cast<float*>(pdr->get_data_ptr());
@@ -143,6 +207,3 @@ void ToolManager::add_tool(Tool* tool_to_add)
     }
     this->tools.push_back( tool_to_add );
 }
-
-
-
