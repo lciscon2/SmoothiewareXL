@@ -191,10 +191,9 @@ void TMC26X::init(uint16_t cs)
 
     started = true;
 
-//#if 1
     //set to a conservative start value
 //    setConstantOffTimeChopper(7, 54, 13, 12, 1);
-//#else
+
     //void TMC26X::setSpreadCycleChopper( constant_off_time,  blank_time,  hysteresis_start,  hysteresis_end,  hysteresis_decrement);
 
     // openbuilds high torque nema23 3amps (2.8)
@@ -203,7 +202,6 @@ void TMC26X::init(uint16_t cs)
 //    setSpreadCycleChopper(5, 54, 5, 0, 0);
     // for 4amp Nema24 @ 12v
     //setSpreadCycleChopper(5, 54, 4, 0, 0);
-//#endif
 
     setEnabled(false);
 

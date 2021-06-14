@@ -43,14 +43,16 @@ void ToolManager::on_gcode_received(void *argument)
 {
     Gcode *gcode = static_cast<Gcode*>(argument);
 
-    if( gcode->has_letter('T') ) {
-			//filter out certain lines because they are not tool changes!!
-		if(gcode->has_m) {
-			if((gcode->m == 104 ) || ( gcode->m == 109 )) { // temperature settings
-		//			gcode->stream->printf("Skipping temp command\n");
-				return;
-			}
+	//filter out certain lines because they are not tool changes!!
+	if(gcode->has_m) {
+		if((gcode->m == 104 ) || ( gcode->m == 109 )) { // temperature settings
+//			gcode->stream->printf("Skipping temp command\n");
+			return;
 		}
+	}
+
+
+    if( gcode->has_letter('T') ) {
 
         int new_tool = gcode->get_value('T');
 		gcode->stream->printf("Toolmanager new tool: %d\n", new_tool);

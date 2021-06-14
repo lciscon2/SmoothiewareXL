@@ -88,7 +88,8 @@ float Gcode::get_value( char letter, char **ptr ) const
     for (; *cs; cs++) {
         if( letter == *cs ) {
             cs++;
-            float r = parse_float(cs, &cn);
+//            float r = parse_float(cs, &cn); this doesn't handle the hex values in M911.2 correctly
+			float r = strtof(cs, &cn);
             if(ptr != nullptr) *ptr= cn;
             if (cn > cs)
                 return r;
@@ -226,7 +227,8 @@ void Gcode::strip_parameters()
             }
             // find the end of the parameter and its value
             char *eos;
-            parse_float(pch+1, &eos);
+			strtof(pch+1, &eos);
+//            parse_float(pch+1, &eos); this doesn't handle the hex values in M911.2 correctly
             cn= eos; // point to end of last parameter
             pch= strpbrk(cn, "XYZIJK"); // find next parameter
         }

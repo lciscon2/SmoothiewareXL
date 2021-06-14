@@ -162,12 +162,12 @@ void TemperatureControl::load_config()
     this->min_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, min_temp_checksum)->by_default(0)->as_number();
 
 	float tpct = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, tolerance_pct_checksum)->by_default(0)->as_number();
-	    if (tpct > 99.0) {
-	      tpct = 99.0;
-	    } else if (tpct < 0.0) {
-	      tpct = 0.0;
-	    }
-	    this->tolerance_pct = tpct;
+    if (tpct > 99.0) {
+      tpct = 99.0;
+    } else if (tpct < 0.0) {
+      tpct = 0.0;
+    }
+    this->tolerance_pct = tpct;
 
     // Heater pin
     this->heater_pin.from_string( THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, heater_pin_checksum)->by_default("nc")->as_string());
@@ -369,8 +369,6 @@ void TemperatureControl::on_gcode_received(void *argument)
                     // wait for temp to be reached, no more gcodes will be fetched until this is complete
                     if( gcode->m == this->set_and_wait_m_code) {
                         if(isinf(get_temperature()) && isinf(sensor->get_temperature())) {
-                            THEKERNEL->streams->printf("Temperature reading is unreliable on %s HALT asserted - reset or M999 required\n", designator.c_str());
-                            THEKERNEL->call_event(ON_HALT, nullptr);
 							if (gcode->subcode == 1) {
                               //ignore errors...just return
                             } else {
