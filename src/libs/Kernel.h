@@ -17,6 +17,10 @@
 #include <vector>
 #include <string>
 
+// Juicyboard specific
+#include "modules/JuicyBoard/R1000A_I2C/R1000A_I2C.h"
+#include "modules/JuicyBoard/R1000A_MODBUS/R1000A_MODBUS.h"
+
 //Module manager
 class Config;
 class Module;
@@ -51,6 +55,8 @@ class Kernel {
         bool is_grbl_mode() const { return grbl_mode; }
         bool is_ok_per_line() const { return ok_per_line; }
 
+		bool is_modbus_mode() const { return modbus_mode; }
+
         void set_feed_hold(bool f) { feed_hold= f; }
         bool get_feed_hold() const { return feed_hold; }
         bool is_feed_hold_enabled() const { return enable_feed_hold; }
@@ -74,6 +80,10 @@ class Kernel {
         Configurator*     configurator;
         SimpleShell*      simpleshell;
 
+		// adding I2C for Juicyboard
+ 		R1000A_I2C*       i2c;
+ 		R1000A_MODBUS*    modbus;
+
         SlowTicker*       slow_ticker;
         StepTicker*       step_ticker;
         Adc*              adc;
@@ -87,6 +97,7 @@ class Kernel {
             bool use_leds:1;
             bool halted:1;
             bool grbl_mode:1;
+			bool modbus_mode:1;
             bool feed_hold:1;
             bool ok_per_line:1;
             bool enable_feed_hold:1;

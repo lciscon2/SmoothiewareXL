@@ -62,6 +62,7 @@ class Robot : public Module {
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
         uint8_t register_motor(StepperMotor*);
         uint8_t get_number_registered_motors() const {return n_motors; }
+		wcs_t get_tool_offset() {return tool_offset; }
 
         BaseSolution* arm_solution;                           // Selected Arm solution ( millimeters to step calculation )
 

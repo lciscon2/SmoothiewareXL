@@ -45,14 +45,17 @@ void PT1000::get_raw()
 {
     int adc_value= new_PT1000_reading();
     float t = adc_value_to_temperature(new_PT1000_reading());
+	uint32_t maxval = THEKERNEL->adc->get_max_value();
     THEKERNEL->streams->printf("PT1000: adc= %d, temp= %f\n", adc_value, t);
+	THEKERNEL->streams->printf("PT1000: max adc= %lu\n", maxval);
     // reset the min/max
     min_temp = max_temp = t;
 }
 
 float PT1000::adc_value_to_temperature(uint32_t adc_value)
 {
-    const uint32_t max_adc_value= THEKERNEL->adc->get_max_value();
+//    const uint32_t max_adc_value= THEKERNEL->adc->get_max_value();
+	const uint32_t max_adc_value= 16310; //BUGBUG HACKHACK FIXFIX LC unconnected floats around???
     if ((adc_value >= max_adc_value) || (adc_value == 0))
         return infinityf();
 
@@ -64,6 +67,10 @@ float PT1000::adc_value_to_temperature(uint32_t adc_value)
     float x4 = (x3 * x);
 
     float t = (13980.0f * x4) + (-7019.0f * x3) + (3760.0f * x2) + (796.7f * x) + (-230.9f);
+
+//	if (t > 10000) {
+//		THEKERNEL->streams->printf("PT1000: adc= %d, temp= %f\n", adc_value, t);
+//	}
 
     return t;
 }

@@ -51,6 +51,10 @@ class TemperatureControl : public Module {
         float preset2;
 
         TempSensor *sensor;
+
+		// Juicyboard PXU (Redlion) specific variable
+		bool isMODBUS;
+
         float i_max;
         int o;
         float last_reading;
@@ -70,7 +74,7 @@ class TemperatureControl : public Module {
         float PIDdt;
 
         float runaway_error_range;
-		
+
 		float tolerance_pct;
 
         enum RUNAWAY_TYPE {NOT_HEATING, HEATING_UP, COOLING_DOWN, TARGET_TEMPERATURE_REACHED};

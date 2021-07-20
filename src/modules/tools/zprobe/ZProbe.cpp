@@ -33,10 +33,14 @@
 //#include "wait_api.h"
 
 // strategies we know about
-#include "DeltaCalibrationStrategy.h"
-#include "ThreePointStrategy.h"
-#include "DeltaGridStrategy.h"
+//#include "DeltaCalibrationStrategy.h"
+//#include "ThreePointStrategy.h"
+//#include "DeltaGridStrategy.h"
 #include "CartGridStrategy.h"
+
+// Juicyboard modules
+#include "modules/JuicyBoard/R1001/R1001.h"
+
 
 #define enable_checksum          CHECKSUM("enable")
 #define probe_pin_checksum       CHECKSUM("probe_pin")
@@ -84,6 +88,9 @@
 #define cam_tool0_checksum    CHECKSUM("cam_tool0")
 #define cam_tool1_checksum    CHECKSUM("cam_tool1")
 #define cam_neutral_checksum    CHECKSUM("cam_neutral")
+
+#define slot_num_checksum                    CHECKSUM("cam_slot_num")
+#define inverted_checksum                    CHECKSUM("cam_inverted")
 
 #define X_AXIS 0
 #define Y_AXIS 1
@@ -169,6 +176,7 @@ void ZProbe::config_load()
 
             // check with each known strategy and load it if it matches
             switch(cs) {
+/* REMOVED
                 case delta_calibration_strategy_checksum:
                     ls= new DeltaCalibrationStrategy(this);
                     found= true;
@@ -184,6 +192,7 @@ void ZProbe::config_load()
                     ls= new DeltaGridStrategy(this);
                     found= true;
                     break;
+*/
 
                 case cart_grid_leveling_strategy_checksum:
                     ls= new CartGridStrategy(this);
@@ -208,7 +217,7 @@ void ZProbe::config_load()
     // may be deprecated
     if(this->strategies.empty()) {
         if(this->is_delta) {
-            this->strategies.push_back(new DeltaCalibrationStrategy(this));
+            this->strategies.push_back(new CartGridStrategy(this));
             this->strategies.back()->handleConfig();
         }
     }
@@ -244,18 +253,32 @@ void ZProbe::config_load()
 
 	this->cam_steps_degree = THEKERNEL->config->value(zprobe_checksum, cam_steps_degree_checksum)->by_default(302.00F)->as_number(); // steps per degree for the cam
 	this->cam_speed = THEKERNEL->config->value(zprobe_checksum, cam_speed_checksum)->by_default(360.00F)->as_number(); // degrees per second
-	this->cam_tool0 = THEKERNEL->config->value(zprobe_checksum, cam_tool0_checksum)->by_default(180.00F)->as_number(); // steps per degree for the cam
-	this->cam_tool1 = THEKERNEL->config->value(zprobe_checksum, cam_tool1_checksum)->by_default(0.00F)->as_number(); // steps per degree for the cam
-	this->cam_neutral = THEKERNEL->config->value(zprobe_checksum, cam_neutral_checksum)->by_default(90.00F)->as_number(); // steps per degree for the cam
-	this->cam_angle_offset = THEKERNEL->config->value(zprobe_checksum, cam_angle_offset_checksum)->by_default(-35.00F)->as_number(); // steps per degree for the cam
 
+	this->cam_angle_offset = THEKERNEL->config->value(zprobe_checksum, cam_angle_offset_checksum)->by_default(-35.00F)->as_number(); // steps per degree for the cam
+	this->cam_tool0 = THEKERNEL->config->value(zprobe_checksum, cam_tool0_checksum)->by_default(180.00F)->as_number(); // angle for locking tool 0
+	this->cam_tool1 = THEKERNEL->config->value(zprobe_checksum, cam_tool1_checksum)->by_default(0.00F)->as_number(); // angle for locking tool 1
+	this->cam_neutral = THEKERNEL->config->value(zprobe_checksum, cam_neutral_checksum)->by_default(90.00F)->as_number(); // angle for neutral position
 
 	this->cam_pin= new Pin();
-	this->cam_pin->from_string(THEKERNEL->config->value(zprobe_checksum, cam_pin_checksum)->by_default("nc")->as_string())->as_output();
-	if(!this->cam_pin->connected()) {
-		delete this->cam_pin;
-		this->cam_pin= nullptr;
+
+	if (!THEKERNEL->is_modbus_mode()) {
+		this->cam_pin->from_string(THEKERNEL->config->value(zprobe_checksum, cam_pin_checksum)->by_default("nc")->as_string())->as_output();
+		if(!this->cam_pin->connected()) {
+			delete this->cam_pin;
+			this->cam_pin= nullptr;
+		}
+	} else {
+		// Juicyware stepper motor pin identification
+		int motor_slot_num = THEKERNEL->config->value(zprobe_checksum, slot_num_checksum)->by_default(0)->as_int();    // get slot number from config file, example: "extruder.hotend.slot_num 6"
+
+		MotorPins CurrentMotorPins = getMotorPins(motor_slot_num);
+		Pin en_pin;
+
+		this->cam_pin->from_string(CurrentMotorPins.step_pin)->as_output();
+		en_pin.from_string(CurrentMotorPins.en_pin)->as_output();
+		en_pin.set(false);
 	}
+
 
 }
 
@@ -294,6 +317,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
 
     if(this->active_pin.get()) {
         // probe already triggered so abort
+		THEKERNEL->streams->printf("Probe already triggered\n");
         return false;
     }
 
@@ -448,9 +472,9 @@ float ZProbe::get_tool_temperature(int toolnum)
     struct pad_temperature temp;
     uint16_t heater_cs;
     if (toolnum == 0) {
-        heater_cs = CHECKSUM("hotend");
+        heater_cs = CHECKSUM("hotend");  //BUGBUG HACKHACK FIXFIX magic name??
     } else {
-      heater_cs = CHECKSUM("hotend2");
+      heater_cs = CHECKSUM("hotend2"); //BUGBUG HACKHACK FIXFIX magic name??
     }
     bool ok = PublicData::get_value( temperature_control_checksum, current_temperature_checksum, heater_cs, &temp );
 
@@ -490,9 +514,10 @@ bool ZProbe::check_probe_state(bool check1a, bool check2a)
 
 void ZProbe::clear_cam(Gcode *gcode)
 {
+	bool success = false;
 	//make sure sensor is initialized properly
 	//for this task we just want a simple on/off state without all the smart stuff
- 	set_sensor_state(gcode, SENSOR_STATE_OFF);  // was SENSOR_STATE_ON
+ 	set_sensor_state(gcode, SENSOR_STATE_OFF);
 
 	//first check if either probe is already triggered.  If it is, move a bit until it goes off.
 	if (this->check_probe_state(true,true)) {
@@ -504,13 +529,14 @@ void ZProbe::clear_cam(Gcode *gcode)
 			this->move_cam(gcode, i);
 			if (!this->check_probe_state(true,true)) {
 				gcode->stream->printf(" Found neutral position\n");
+				success = true;
 				this->move_cam(gcode, i);
 				break;
 			}
 		}
 
 		//if either one of the sensors is still triggered, then something is wrong
-		if (this->check_probe_state(true,true)) {
+		if (!success) {
 			//throw an error
 			//probe never un-triggered
 			gcode->stream->printf("//action:error Sensor setup failure\n");
@@ -527,6 +553,7 @@ void ZProbe::init_cam(Gcode *gcode)
 	bool sensor1_triggered = false;
 	bool sensor2_triggered = false;
 	float start = -1;
+	float pend = -1;
 	float end = -1;
 	float home;
 
@@ -537,29 +564,29 @@ void ZProbe::init_cam(Gcode *gcode)
 
 	//make sure sensor is initialized properly
 	//for this task we just want a simple on/off state without all the smart stuff
- 	set_sensor_state(gcode, SENSOR_STATE_OFF);  // was SENSOR_STATE_ON
+ 	set_sensor_state(gcode, SENSOR_STATE_OFF);
 
 	this->cam_position = 0;
 
 	for (int i=1;i<370;i++) {
 		this->move_cam(gcode, i);
-		if (this->check_probe_state(true,false)) {
-			sensor1_triggered = true;
-			if (start < 0) {
-				gcode->stream->printf(" Found start at %d\n", i);
-				start = i;
-			}
-		} else {
-			if (end < 0) {
+		if (end < 0) {
+			if (this->check_probe_state(true,false)) {
+				gcode->stream->printf("+");
+				sensor1_triggered = true;
+				pend = -1;
+				if (start < 0) {
+					gcode->stream->printf("\n Found start at %d\n", i);
+					start = i;
+				}
+			} else {
+				gcode->stream->printf("-");
 				if (start >= 0) {
-					gcode->stream->printf(" Found end at %d\n", i);
-					end = i;
-
-					//check for noise.  ingore short duration
-					if (end - start < 3) {
-						gcode->stream->printf(" Discarding noise\n");
-						start = -1;
-						end = -1;
+					if (pend < 0) {
+							pend = i;
+					} else {
+							gcode->stream->printf("\n Found end at %d\n", i);
+							end = i;
 					}
 				}
 			}
@@ -569,6 +596,8 @@ void ZProbe::init_cam(Gcode *gcode)
 			sensor2_triggered = true;
 		}
 	}
+
+	gcode->stream->printf("\n");
 
 	if ((!sensor1_triggered) || (!sensor2_triggered)) {
 		//throw an error
@@ -616,6 +645,7 @@ void ZProbe::move_cam(Gcode *gcode, float angle)
 	}
 
 	this->cam_position = angle;
+//	safe_delay_ms(100);
 }
 
 

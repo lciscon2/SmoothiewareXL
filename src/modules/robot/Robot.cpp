@@ -35,6 +35,9 @@
 #include "ActuatorCoordinates.h"
 #include "EndstopsPublicAccess.h"
 
+// Juicyboard modules
+#include "modules/JuicyBoard/R1001/R1001.h"
+
 #include "mbed.h" // for us_ticker_read()
 #include "mri.h"
 
@@ -142,7 +145,9 @@ void Robot::on_module_loaded()
     CHECKSUM(X "_en_pin"),          \
     CHECKSUM(X "_steps_per_mm"),    \
     CHECKSUM(X "_max_rate"),        \
-    CHECKSUM(X "_acceleration")     \
+    CHECKSUM(X "_acceleration"),     \
+	CHECKSUM(X "_slot_num"),        \
+	CHECKSUM(X "_inverted")     \
 }
 
 void Robot::load_config()
@@ -209,7 +214,7 @@ void Robot::load_config()
     this->s_value             = THEKERNEL->config->value(laser_module_default_power_checksum)->by_default(0.8F)->as_number();
 
      // Make our Primary XYZ StepperMotors, and potentially A B C
-    uint16_t const motor_checksums[][6] = {
+    uint16_t const motor_checksums[][8] = {
         ACTUATOR_CHECKSUMS("alpha"), // X
         ACTUATOR_CHECKSUMS("beta"),  // Y
         ACTUATOR_CHECKSUMS("gamma"), // Z
@@ -228,20 +233,47 @@ void Robot::load_config()
     this->default_acceleration= THEKERNEL->config->value(acceleration_checksum)->by_default(100.0F )->as_number(); // Acceleration is in mm/s^2
 
     // make each motor
-    for (size_t a = 0; a < MAX_ROBOT_ACTUATORS; a++) {
-        Pin pins[3]; //step, dir, enable
-        for (size_t i = 0; i < 3; i++) {
-            pins[i].from_string(THEKERNEL->config->value(motor_checksums[a][i])->by_default("nc")->as_string())->as_output();
-        }
+	int motor_slot_num;
+	bool motor_inverted;
+	size_t start_val, end_val;
 
-        if(!pins[0].connected() || !pins[1].connected()) { // step and dir must be defined, but enable is optional
-            if(a <= Z_AXIS) {
-                THEKERNEL->streams->printf("FATAL: motor %c is not defined in config\n", 'X'+a);
-                n_motors= a; // we only have this number of motors
-                return;
-            }
-            break; // if any pin is not defined then the axis is not defined (and axis need to be defined in contiguous order)
-        }
+	if (!THEKERNEL->is_modbus_mode()) {
+		start_val = 0;
+		end_val = MAX_ROBOT_ACTUATORS - 1;
+	} else {
+		start_val = X_AXIS;
+		end_val = Z_AXIS;
+	}
+
+	for (size_t a = start_val; a <= end_val; a++) {
+
+        Pin pins[3]; //step, dir, enable
+
+		if (!THEKERNEL->is_modbus_mode()) {
+	        for (size_t i = 0; i < 3; i++) {
+	            pins[i].from_string(THEKERNEL->config->value(motor_checksums[a][i])->by_default("nc")->as_string())->as_output();
+	        }
+
+	        if(!pins[0].connected() || !pins[1].connected()) { // step and dir must be defined, but enable is optional
+	            if(a <= Z_AXIS) {
+	                THEKERNEL->streams->printf("FATAL: motor %c is not defined in config\n", 'X'+a);
+	                n_motors= a; // we only have this number of motors
+	                return;
+	            }
+	            break; // if any pin is not defined then the axis is not defined (and axis need to be defined in contiguous order)
+	        }
+		} else {
+			// Juicyware stepper motor pin identification
+			motor_slot_num = THEKERNEL->config->value(motor_checksums[a][6])->by_default(0)->as_int();    // get slot number from config file, example: "alpha_slot_num 6"
+			motor_inverted = THEKERNEL->config->value(motor_checksums[a][7])->by_default(false)->as_bool();    // if direction is inverted, example: "alpha_inverted true"
+			MotorPins CurrentMotorPins = getMotorPins(motor_slot_num);
+
+			pins[0].from_string(CurrentMotorPins.step_pin)->as_output();
+			pins[1].from_string(CurrentMotorPins.dir_pin)->as_output();
+			pins[1].set_inverting(motor_inverted);
+			pins[2].from_string(CurrentMotorPins.en_pin)->as_output();
+			// End Juicyware motor pin identification
+		}
 
         StepperMotor *sm = new StepperMotor(pins[0], pins[1], pins[2]);
         // register this motor (NB This must be 0,1,2) of the actuators array

@@ -24,8 +24,9 @@ SlowTicker* global_slow_ticker;
 SlowTicker::SlowTicker(){
     global_slow_ticker = this;
 
+	// Juicyware: eliminated ISP button from ticker
     // ISP button FIXME: WHy is this here?
-    ispbtn.from_string("2.10")->as_input()->pull_up();
+//    ispbtn.from_string("2.10")->as_input()->pull_up();
 
     LPC_SC->PCONP |= (1 << 22);     // Power Ticker ON
     LPC_TIM2->MCR = 3;              // Match on MR0, reset on MR0
@@ -80,10 +81,11 @@ void SlowTicker::tick(){
         flag_1s_flag++;
     }
 
+	// Juicyware: eliminated ISP button from ticker
     // Enter MRI mode if the ISP button is pressed
     // TODO: This should have it's own module
-    if (ispbtn.get() == 0)
-        __debugbreak();
+//    if (ispbtn.get() == 0)
+//        __debugbreak();
 
 }
 
@@ -128,4 +130,3 @@ extern "C" void TIMER2_IRQHandler (void){
     }
     global_slow_ticker->tick();
 }
-

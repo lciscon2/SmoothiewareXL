@@ -35,6 +35,11 @@
 #include "Laser.h"
 #endif
 
+// Juicyboard specific
+//#include "modules/JuicyBoard/R1000A_I2C/R1000A_I2C.h"
+//#include "modules/JuicyBoard/R1000A_MODBUS/R1000A_MODBUS.h"
+#include "Pin.h"
+
 #include "platform_memory.h"
 
 #include <malloc.h>
@@ -43,12 +48,23 @@
 
 #define laser_checksum CHECKSUM("laser")
 
+#define uart0_disable_checksum     CHECKSUM("uart0_disable")                       // JUICYWARE SPECIFIC
+
 #define base_stepping_frequency_checksum            CHECKSUM("base_stepping_frequency")
 #define microseconds_per_step_pulse_checksum        CHECKSUM("microseconds_per_step_pulse")
 #define disable_leds_checksum                       CHECKSUM("leds_disable")
 #define grbl_mode_checksum                          CHECKSUM("grbl_mode")
 #define feed_hold_enable_checksum                   CHECKSUM("enable_feed_hold")
 #define ok_per_line_checksum                        CHECKSUM("ok_per_line")
+
+#define modbus_mode_checksum                          CHECKSUM("modbus_mode")
+
+#define modbus_checksum             CHECKSUM("modbus")
+#define slotnum_checksum            CHECKSUM("slot")
+#define baud_checksum               CHECKSUM("baud")
+#define databits_checksum           CHECKSUM("databits")
+#define stopbits_checksum           CHECKSUM("stopbits")
+#define parity_checksum             CHECKSUM("parity")
 
 Kernel* Kernel::instance;
 
@@ -107,6 +123,20 @@ Kernel::Kernel()
         this->serial = new(AHB0) SerialConsole(0);
     }
 
+	this->modbus_mode = this->config->value( modbus_mode_checksum )->by_default(false)->as_bool(); //enables Juicyboard settings
+
+	if (this->is_modbus_mode()) {
+		// Juicyware
+    	// add Juicyboard I2C as part of kernel to save memory
+	    this->i2c = new R1000A_I2C();
+	    this->modbus = new R1000A_MODBUS(   this->config->value(modbus_checksum, slotnum_checksum)->by_default(0)->as_int() ,
+	                                        this->config->value(modbus_checksum, baud_checksum)->by_default(9600)->as_int() ,
+	                                        this->config->value(modbus_checksum, databits_checksum)->by_default(8)->as_int() ,
+	                                        this->config->value(modbus_checksum, stopbits_checksum)->by_default(1)->as_int() ,
+	                                        this->config->value(modbus_checksum, parity_checksum)->by_default("N")->as_string()
+	                                            );
+	}
+
     //some boards don't have leds.. TOO BAD!
     this->use_leds = !this->config->value( disable_leds_checksum )->by_default(false)->as_bool();
 
@@ -122,6 +152,13 @@ Kernel::Kernel()
     this->ok_per_line = this->config->value( ok_per_line_checksum )->by_default(true)->as_bool();
 
     this->add_module( this->serial );
+
+	// execute uart0 disable
+    // check for uart0 disable
+    if (this->config->value( uart0_disable_checksum )->by_default(false)->as_bool()) {
+        //LPC_SC->PCONP &= 0xFFFFFFF7;            // low level shutdown of UART0, power and clock
+        LPC_PINCON->PINSEL0 &= 0xFFFFFF0F;      // low level pin select of P0.2 and P0.3 to GPIO
+    }
 
     // HAL stuff
     add_module( this->slow_ticker = new SlowTicker());
@@ -382,4 +419,3 @@ void Kernel::unregister_for_event(_EVENT_ENUM id_event, Module *mod)
         }
     }
 }
-

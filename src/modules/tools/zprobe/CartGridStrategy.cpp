@@ -740,7 +740,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
 
 void CartGridStrategy::doCompensation(float *target, bool inverse)
 {
-    // Adjust print surface height by linear interpolation over the bed_level array.
+    // Adjust print surf ace height by linear interpolation over the bed_level array.
     // offset scale: 1 for default (use offset as is)
     float scale = 1.0F;
     if (!isnan(this->damping_interval)) {
@@ -761,10 +761,16 @@ void CartGridStrategy::doCompensation(float *target, bool inverse)
     float min_y = std::min(this->y_start, this->y_start + this->y_size);
     float max_y = std::max(this->y_start, this->y_start + this->y_size);
 
+	Robot::wcs_t tool_offset = THEROBOT->get_tool_offset();
+
+	//offset the target for the current tool offset
+	float targetX = target[X_AXIS] - std::get<X_AXIS>(tool_offset);
+	float targetY = target[Y_AXIS] - std::get<Y_AXIS>(tool_offset);
+
     // clamp the input to the bounds of the compensation grid
     // if a point is beyond the bounds of the grid, it will get the offset of the closest grid point
-    float x_target = std::min(std::max(target[X_AXIS], min_x), max_x);
-    float y_target = std::min(std::max(target[Y_AXIS], min_y), max_y);
+    float x_target = std::min(std::max(targetX, min_x), max_x);
+    float y_target = std::min(std::max(targetY, min_y), max_y);
 
     // we need to make sure that floor_x and floor_y are always < grid_size-1
     float grid_x = std::max(0.001F, std::min(this->current_grid_x_size - 1.001F, (x_target - this->x_start) / (this->x_size / (this->current_grid_x_size - 1))));
@@ -792,6 +798,7 @@ void CartGridStrategy::doCompensation(float *target, bool inverse)
 
 #if 0
     THEKERNEL->streams->printf("//DEBUG: TARGET: %f, %f, %f\n", target[0], target[1], target[2]);
+	THEKERNEL->streams->printf("//DEBUG: TOOL TARGET: %f, %f, %f\n", targetX, targetY, target[2]);
     THEKERNEL->streams->printf("//DEBUG: grid_x= %f\n", grid_x);
     THEKERNEL->streams->printf("//DEBUG: grid_y= %f\n", grid_y);
     THEKERNEL->streams->printf("//DEBUG: floor_x= %d\n", floor_x);
