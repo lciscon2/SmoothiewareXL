@@ -55,10 +55,11 @@ public:
 	void set_sensor_position_new(Gcode *gcode, int toolnum, int pos, bool checkprobe);
 	void set_sensor_position_old(Gcode *gcode, int toolnum, int pos, bool checkprobe);
 
-	bool check_probe_state(bool check1, bool check2);
+	bool check_probe_state(Gcode *gcode, bool check1, bool check2);
 	void clear_cam(Gcode *gcode);
 	void move_cam(Gcode *gcode, float angle);
 	void init_cam(Gcode *gcode);
+	void test_cam(Gcode *gcode);
 
     bool getProbeStatus() { return this->pin.get(); }
     float getSlowFeedrate() const { return slow_feedrate; }
@@ -111,6 +112,7 @@ private:
 	Pin *cam_pin;
 	float cam_steps_degree;
 	float cam_speed;
+	float cam_step_time;
 	float cam_angle_offset;
 	float cam_position;
 	float cam_tool0;

@@ -261,6 +261,8 @@ void ZProbe::config_load()
 
 	this->cam_pin= new Pin();
 
+	this->cam_step_time = 1000000/(this->cam_speed * this->cam_steps_degree)*2;
+
 	if (!THEKERNEL->is_modbus_mode()) {
 		this->cam_pin->from_string(THEKERNEL->config->value(zprobe_checksum, cam_pin_checksum)->by_default("nc")->as_string())->as_output();
 		if(!this->cam_pin->connected()) {
@@ -485,31 +487,15 @@ float ZProbe::get_tool_temperature(int toolnum)
     return 0.0F;
 }
 
-bool ZProbe::check_probe_state(bool check1a, bool check2a)
+bool ZProbe::check_probe_state(Gcode *gcode, bool check1a, bool check2a)
 {
-	bool checkval = true;
-
-	if (check1a) {
-	  if(this->pin.get()) {
-		  checkval = true;
-	  } else {
-		checkval = false;
-	  }
-
-	  if (checkval) {
-		  return(checkval);
-	  }
-  	}
-
-  	if (check2a) {
-	  if(this->pin2.get()) {
-		checkval = true;
-	  } else {
-		checkval = false;
-	  }
+	if ((check1a && this->pin.get()) || (check2a && this->pin2.get())) {
+//		gcode->stream->printf("+");
+		return true;
+	} else {
+//		gcode->stream->printf("-");
+		return false;
 	}
-
-	return(checkval);
 }
 
 void ZProbe::clear_cam(Gcode *gcode)
@@ -520,14 +506,14 @@ void ZProbe::clear_cam(Gcode *gcode)
  	set_sensor_state(gcode, SENSOR_STATE_OFF);
 
 	//first check if either probe is already triggered.  If it is, move a bit until it goes off.
-	if (this->check_probe_state(true,true)) {
+	if (this->check_probe_state(gcode, true,true)) {
 		gcode->stream->printf(" Moving off sensor\n");
 
 		this->cam_position = 0;
 
 		for (int i=1;i<360;i++) {
 			this->move_cam(gcode, i);
-			if (!this->check_probe_state(true,true)) {
+			if (!this->check_probe_state(gcode, true,true)) {
 				gcode->stream->printf(" Found neutral position\n");
 				success = true;
 				this->move_cam(gcode, i);
@@ -535,15 +521,14 @@ void ZProbe::clear_cam(Gcode *gcode)
 			}
 		}
 
+		set_sensor_state(gcode, SENSOR_STATE_OFF);
+
 		//if either one of the sensors is still triggered, then something is wrong
 		if (!success) {
 			//throw an error
 			//probe never un-triggered
 			gcode->stream->printf("//action:error Sensor setup failure\n");
 //			THEKERNEL->call_event(ON_HALT, nullptr);
-		} else {
-			//reset the sensor, since it didn't initialize correctly if the sensor is on
-			set_sensor_state(gcode, SENSOR_STATE_OFF);
 		}
 	}
 }
@@ -571,8 +556,7 @@ void ZProbe::init_cam(Gcode *gcode)
 	for (int i=1;i<370;i++) {
 		this->move_cam(gcode, i);
 		if (end < 0) {
-			if (this->check_probe_state(true,false)) {
-				gcode->stream->printf("+");
+			if (this->check_probe_state(gcode, true,false)) {
 				sensor1_triggered = true;
 				pend = -1;
 				if (start < 0) {
@@ -580,7 +564,6 @@ void ZProbe::init_cam(Gcode *gcode)
 					start = i;
 				}
 			} else {
-				gcode->stream->printf("-");
 				if (start >= 0) {
 					if (pend < 0) {
 							pend = i;
@@ -592,7 +575,7 @@ void ZProbe::init_cam(Gcode *gcode)
 			}
 		}
 
-		if (this->check_probe_state(false,true)) {
+		if (this->check_probe_state(gcode, false,true)) {
 			sensor2_triggered = true;
 		}
 	}
@@ -602,8 +585,8 @@ void ZProbe::init_cam(Gcode *gcode)
 	if ((!sensor1_triggered) || (!sensor2_triggered)) {
 		//throw an error
 		//probe did not trigger
-		gcode->stream->printf("//action:error Sensor initialization failure\n");
-		THEKERNEL->call_event(ON_HALT, nullptr);
+		gcode->stream->printf("//action:error Sensor measurement failure\n");
+		//		THEKERNEL->call_event(ON_HALT, nullptr);
 	}
 
 	this->cam_position = 0;
@@ -615,11 +598,44 @@ void ZProbe::init_cam(Gcode *gcode)
 
 }
 
+void ZProbe::test_cam(Gcode *gcode)
+{
+	float start = -1;
+	float pend = -1;
+	float end = -1;
+	float home;
+
+	gcode->stream->printf(" Testing cam\n");
+
+	//make sure sensor is initialized properly
+	//for this task we just want a simple on/off state without all the smart stuff
+ 	set_sensor_state(gcode, SENSOR_STATE_OFF);
+
+	this->cam_position = 0;
+
+	for (int i=1;i<360;i++) {
+		this->move_cam(gcode, i);
+		gcode->stream->printf("%3d:", i);
+		if (this->check_probe_state(gcode, true,false)) {
+			gcode->stream->printf("0");
+		} else {
+			gcode->stream->printf("-");
+		}
+		if (this->check_probe_state(gcode, false,true)) {
+			gcode->stream->printf("1");
+		} else {
+			gcode->stream->printf("-");
+		}
+		gcode->stream->printf("\n");
+	}
+
+	gcode->stream->printf("Done!\n");
+}
+
 void ZProbe::move_cam(Gcode *gcode, float angle)
 {
 	float deltaangle;
 	float steps;
-	float step_time = 1000000/(this->cam_speed * this->cam_steps_degree)*2;
 
 	if (angle == cam_position) {
 		gcode->stream->printf("CAM already at angle\n");
@@ -639,13 +655,13 @@ void ZProbe::move_cam(Gcode *gcode, float angle)
 	for(int x= 0; x<steps; x++)  //Loop the forward stepping enough times for motion to be visible
 	{
 		this->cam_pin->set(true);
-		safe_delay_us(step_time);
+		safe_delay_us(this->cam_step_time);
 		this->cam_pin->set(false);
-		safe_delay_us(step_time);
+		safe_delay_us(this->cam_step_time);
 	}
 
 	this->cam_position = angle;
-//	safe_delay_ms(100);
+	//safe_delay_ms(100);
 }
 
 
@@ -766,7 +782,7 @@ void ZProbe::set_sensor_position_old(Gcode *gcode, int toolnum, int pos, bool ch
   //if we are raising the servo double check that the sensor triggered correctly
   bool checkval = true;
   if ((this->disable_check_probe == false) && (checkprobe == true)) {
-	  checkval = this->check_probe_state(check1,check2);
+	  checkval = this->check_probe_state(gcode, check1,check2);
 	  if (checkval == false) {
     	gcode->stream->printf("//action:error Sensor initialization failure\n");
     	THEKERNEL->call_event(ON_HALT, nullptr);
@@ -1073,6 +1089,7 @@ void ZProbe::on_gcode_received(void *argument)
     } else if(gcode->has_m) {
         // M code processing here
         int c;
+		int tangle;
         switch (gcode->m) {
 			case 118: //echo input to output
 				{
@@ -1144,7 +1161,7 @@ void ZProbe::on_gcode_received(void *argument)
 
 			case 676:
 				if (this->cam_pin != nullptr) {
-				  	init_cam(gcode);
+				  	test_cam(gcode);
 				}
 				break;
 
@@ -1225,6 +1242,15 @@ void ZProbe::on_gcode_received(void *argument)
                 gcode->stream->printf("Reset tool state\n");
 				break;
 
+			case 518:
+			     tangle = 10;
+				//move cam X degrees
+				if (gcode->has_letter('E')) {
+                  tangle = gcode->get_value('E');
+                }
+				tangle = tangle + this->cam_position;
+				this->move_cam(gcode, tangle);
+				break;
 
             case 500: // save settings
             case 503: // print settings
