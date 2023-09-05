@@ -508,7 +508,7 @@ void Endstops::move_to_origin(axis_bitmap_t axis)
     if(park_after_home) {
         // do park instead of goto origin
         this->status = MOVE_TO_ORIGIN;
-        handle_park();
+        handle_park(nullptr);
         this->status = NOT_HOMING;
         return;
     }
@@ -1027,13 +1027,19 @@ void Endstops::set_homing_offset(Gcode *gcode)
     gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f will take effect next home\n", homing_axis[X_AXIS].home_offset, homing_axis[Y_AXIS].home_offset, homing_axis[Z_AXIS].home_offset);
 }
 
-void Endstops::handle_park()
+void Endstops::handle_park(Gcode *gcode)
 {
     // TODO: spec says if XYZ specified move to them first then move to MCS of specifed axis
     THEROBOT->push_state();
     THEROBOT->absolute_mode = true;
-    char buf[30];
-    snprintf(buf, sizeof(buf), "G53 G0 X%1.4f Y%1.4f", THEROBOT->from_millimeters(saved_position[X_AXIS]), THEROBOT->from_millimeters(saved_position[Y_AXIS])); // must use machine coordinates in case G92 or WCS is in effect
+    char buf[40];
+	float feed_rate = std::min(homing_axis[X_AXIS].fast_rate, homing_axis[Y_AXIS].fast_rate)*60.0F;
+
+	if (gcode && gcode->has_letter('F')) {
+		feed_rate = gcode->get_value('F');
+	}
+
+	snprintf(buf, sizeof(buf), "G53 G0 X%1.4f Y%1.4f F%1.4f", THEROBOT->from_millimeters(saved_position[X_AXIS]), THEROBOT->from_millimeters(saved_position[Y_AXIS]), feed_rate); // must use machine coordinates in case G92 or WCS is in effect
     struct SerialMessage message{&StreamOutput::NullStream, buf};
     THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message ); // as it is a multi G code command
     // Wait for above to finish
@@ -1050,7 +1056,7 @@ void Endstops::on_gcode_received(void *argument)
         switch(gcode->subcode) {
             case 0: // G28 in grbl mode will do a rapid to the predefined position otherwise it is home command
                 if(THEKERNEL->is_grbl_mode()){
-                    handle_park();
+                    handle_park(gcode);
                 }else{
                     process_home_command(gcode);
                 }
@@ -1069,7 +1075,7 @@ void Endstops::on_gcode_received(void *argument)
                 if(THEKERNEL->is_grbl_mode()) {
                     process_home_command(gcode);
                 }else{
-                    handle_park();
+                    handle_park(gcode);
                 }
                 break;
 

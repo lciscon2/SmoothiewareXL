@@ -55,6 +55,8 @@ public:
 	void set_sensor_position_new(Gcode *gcode, int toolnum, int pos, bool checkprobe);
 	void set_sensor_position_old(Gcode *gcode, int toolnum, int pos, bool checkprobe);
 
+	void ooze_toolchange(Gcode *gcode);
+
 	bool check_probe_state(Gcode *gcode, bool check1, bool check2);
 	void clear_cam(Gcode *gcode);
 	void move_cam(Gcode *gcode, float angle);
@@ -90,6 +92,8 @@ private:
 	float mount_pos1[2];
 	float mount_pos2[2];
 	float mount_pos3[2];
+
+	float ooze_pos[2];
 
     float dwell_before_probing;
     float probe_up_val;

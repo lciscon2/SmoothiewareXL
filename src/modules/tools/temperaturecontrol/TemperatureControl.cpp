@@ -596,7 +596,7 @@ void TemperatureControl::on_second_tick(void *argument)
 	}
 
     sensor->pull_temperature();
-	
+
     // Check whether or not there is a temperature runaway issue, if so stop everything and report it
     if(THEKERNEL->is_halted()) return;
 
@@ -647,7 +647,7 @@ void TemperatureControl::on_second_tick(void *argument)
 
                     // If the temperature is outside the acceptable range for 8 seconds, this allows for some noise spikes without halting
                     if(fabsf(delta) > this->runaway_range){
-                        if(this->runaway_timer++ >= 1) { // this being 8 seconds
+                        if(this->runaway_timer++ >= 2) { // this being 8 seconds
                             THEKERNEL->streams->printf("ERROR: Temperature runaway on %s (delta temp %f), HALT asserted, TURN POWER OFF IMMEDIATELY - reset or M999 required\n", designator.c_str(), delta);
                             THEKERNEL->call_event(ON_HALT, nullptr);
                             this->runaway_state = NOT_HEATING;

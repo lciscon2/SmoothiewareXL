@@ -96,9 +96,10 @@ ENABLE_DEBUG_MONITOR = ENV['ENABLE_DEBUG_MONITOR'] || '0' unless defined? ENABLE
 DEFAULT_SERIAL_BAUD_RATE= ENV['BAUDRATE'] || '115200' unless defined? DEFAULT_SERIAL_BAUD_RATE
 
 # set to true to eliminate all the network code
-unless defined? NONETWORK
-  NONETWORK= false || TESTING
-end
+# unless defined? NONETWORK
+#  NONETWORK= false || TESTING
+# end
+NONETWORK = true
 
 # list of modules to exclude, include directory it is in
 # e.g for a CNC machine
@@ -320,4 +321,3 @@ rule '.o' => lambda{ |objfile| obj2src(objfile, 'c') } do |t|
   puts "Compiling #{t.source}"
   sh "#{CC} #{CFLAGS} #{INCLUDE} #{DEFINES} #{VERSION} -c -o #{t.name} #{t.source}"
 end
-

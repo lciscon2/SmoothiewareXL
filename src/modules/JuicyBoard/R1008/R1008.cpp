@@ -65,5 +65,13 @@ float R1008::get_temperature(){
         chtemp.f = -50.1;
     }
 
+	//BUGBUG HACKHACK FIXFIX
+	//we have to detect if the sensor is not connected and return 0 or infinity in that case.
+	//it appears the 1008 return 850.299 in that situation.  So check for this?!?
+
+	if ((chtemp.f >850) && (chtemp.f < 851)) {
+		chtemp.f = 0;
+	}
+
     return chtemp.f;
 }

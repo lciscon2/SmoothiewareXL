@@ -72,6 +72,9 @@
 #define mount_pos3_x_checksum           CHECKSUM("mount_pos3_x")
 #define mount_pos3_y_checksum           CHECKSUM("mount_pos3_y")
 
+#define ooze_pos_x_checksum           CHECKSUM("ooze_pos_x")
+#define ooze_pos_y_checksum           CHECKSUM("ooze_pos_y")
+
 // from endstop section
 #define delta_homing_checksum    CHECKSUM("delta_homing")
 #define rdelta_homing_checksum    CHECKSUM("rdelta_homing")
@@ -243,6 +246,9 @@ void ZProbe::config_load()
 	this->mount_pos3[0]  = THEKERNEL->config->value(zprobe_checksum, mount_pos3_x_checksum)->by_default(300.0F)->as_number(); // mount point3 x
 	this->mount_pos3[1]  = THEKERNEL->config->value(zprobe_checksum, mount_pos3_y_checksum)->by_default(110.0F)->as_number(); // mount point3 y
 
+	this->ooze_pos[0]  = THEKERNEL->config->value(zprobe_checksum, ooze_pos_x_checksum)->by_default(NAN)->as_number(); // ooze point x
+	this->ooze_pos[1]  = THEKERNEL->config->value(zprobe_checksum, ooze_pos_y_checksum)->by_default(NAN)->as_number(); // ooze point y
+
     this->calibrate_pin.from_string( THEKERNEL->config->value(zprobe_checksum, calibrate_pin_checksum)->by_default("nc" )->as_string())->as_output();
     this->sensor_on_pin.from_string( THEKERNEL->config->value(zprobe_checksum, sensor_on_pin_checksum)->by_default("nc" )->as_string())->as_output();
 
@@ -252,7 +258,7 @@ void ZProbe::config_load()
     this->dwell_before_probing = THEKERNEL->config->value(zprobe_checksum, dwell_before_probing_checksum)->by_default(0)->as_number(); // dwell time in seconds before probing
 
 	this->cam_steps_degree = THEKERNEL->config->value(zprobe_checksum, cam_steps_degree_checksum)->by_default(302.00F)->as_number(); // steps per degree for the cam
-	this->cam_speed = THEKERNEL->config->value(zprobe_checksum, cam_speed_checksum)->by_default(360.00F)->as_number(); // degrees per second
+	this->cam_speed = THEKERNEL->config->value(zprobe_checksum, cam_speed_checksum)->by_default(180.00F)->as_number(); // degrees per second
 
 	this->cam_angle_offset = THEKERNEL->config->value(zprobe_checksum, cam_angle_offset_checksum)->by_default(-35.00F)->as_number(); // steps per degree for the cam
 	this->cam_tool0 = THEKERNEL->config->value(zprobe_checksum, cam_tool0_checksum)->by_default(180.00F)->as_number(); // angle for locking tool 0
@@ -275,10 +281,13 @@ void ZProbe::config_load()
 
 		MotorPins CurrentMotorPins = getMotorPins(motor_slot_num);
 		Pin en_pin;
+		Pin dir_pin;
 
 		this->cam_pin->from_string(CurrentMotorPins.step_pin)->as_output();
 		en_pin.from_string(CurrentMotorPins.en_pin)->as_output();
 		en_pin.set(false);
+		dir_pin.from_string(CurrentMotorPins.dir_pin)->as_output();
+		dir_pin.set_inverting(true);
 	}
 
 
@@ -538,7 +547,6 @@ void ZProbe::init_cam(Gcode *gcode)
 	bool sensor1_triggered = false;
 	bool sensor2_triggered = false;
 	float start = -1;
-	float pend = -1;
 	float end = -1;
 	float home;
 
@@ -553,26 +561,15 @@ void ZProbe::init_cam(Gcode *gcode)
 
 	this->cam_position = 0;
 
-	for (int i=1;i<370;i++) {
+	for (int i=1;i<360;i++) {
 		this->move_cam(gcode, i);
-		if (end < 0) {
-			if (this->check_probe_state(gcode, true,false)) {
-				sensor1_triggered = true;
-				pend = -1;
-				if (start < 0) {
-					gcode->stream->printf("\n Found start at %d\n", i);
-					start = i;
-				}
-			} else {
-				if (start >= 0) {
-					if (pend < 0) {
-							pend = i;
-					} else {
-							gcode->stream->printf("\n Found end at %d\n", i);
-							end = i;
-					}
-				}
+		if (this->check_probe_state(gcode, true,false)) {
+			sensor1_triggered = true;
+			if (start < 0) {
+				gcode->stream->printf("\n Found start at %d\n", i);
+				start = i;
 			}
+			end = i;
 		}
 
 		if (this->check_probe_state(gcode, false,true)) {
@@ -580,31 +577,26 @@ void ZProbe::init_cam(Gcode *gcode)
 		}
 	}
 
-	gcode->stream->printf("\n");
+	gcode->stream->printf("\n Found end at %1.4f\n", end);
 
-	if ((!sensor1_triggered) || (!sensor2_triggered)) {
+	if ((!sensor1_triggered) || (!sensor2_triggered) || (end < 0)) {
 		//throw an error
 		//probe did not trigger
 		gcode->stream->printf("//action:error Sensor measurement failure\n");
 		//		THEKERNEL->call_event(ON_HALT, nullptr);
 	}
 
-	this->cam_position = 0;
+//	this->cam_position = 0;
 	home = (start+end)/2;
 	home = home + this->cam_angle_offset; //center_offset
 	gcode->stream->printf(" Center position set to %1.4f\n", home);
-	this->move_cam(gcode, home);
-	this->cam_position = 0;
-
+//	this->move_cam(gcode, home);
+//	this->cam_position = 0;
+	this->cam_position = 360 - home;
 }
 
 void ZProbe::test_cam(Gcode *gcode)
 {
-	float start = -1;
-	float pend = -1;
-	float end = -1;
-	float home;
-
 	gcode->stream->printf(" Testing cam\n");
 
 	//make sure sensor is initialized properly
@@ -642,11 +634,15 @@ void ZProbe::move_cam(Gcode *gcode, float angle)
 		return;
 	}
 
+//	gcode->stream->printf("CAM moving from %1.4f to %1.4f\n", cam_position, angle);
+
 	if (angle > cam_position) {
 		deltaangle = (angle - cam_position);
 	} else {
 		deltaangle = (360.0 - cam_position + angle);
 	}
+
+//	gcode->stream->printf("CAM delta %1.4f\n", deltaangle);
 
 	steps = round(deltaangle * this->cam_steps_degree);
 //	gcode->stream->printf("Moving cam %1.4f degrees\n", deltaangle);
@@ -803,6 +799,171 @@ void ZProbe::set_sensor_position(Gcode *gcode, int toolnum, int pos, bool checkp
 		set_sensor_position_new(gcode, toolnum, pos, checkprobe);
 	}
 
+}
+
+static int get_active_tool()
+{
+    void *returned_data;
+    bool ok = PublicData::get_value(tool_manager_checksum, get_active_tool_checksum, &returned_data);
+    if (ok) {
+         int active_tool=  *static_cast<int *>(returned_data);
+        return active_tool;
+    } else {
+        return 0;
+    }
+}
+
+
+void ZProbe::ooze_toolchange(Gcode *gcode)
+{
+	float new_temp= NAN, standby_temp=NAN, z_hop=0, speed=6000, retract=0;
+	int toolnum = 0;
+
+	gcode->stream->printf("Executing ooze toolchange  Tool: %d\n", toolnum);
+
+
+	if(gcode->has_letter('S')) new_temp= gcode->get_value('S');
+	if(gcode->has_letter('N')) standby_temp= gcode->get_value('N');
+	if(gcode->has_letter('Z')) z_hop = gcode->get_value('Z');
+	if(gcode->has_letter('F')) speed = gcode->get_value('F');
+	if(gcode->has_letter('E')) retract = gcode->get_value('E');
+	if(gcode->has_letter('T')) toolnum = gcode->get_value('T');
+	if(gcode->has_letter('V')) toolnum = gcode->get_value('V');
+
+
+	//toolnum
+	int old_toolnum = 1 - toolnum;
+	char buf[64];
+	int n;
+
+	float mpos[3];
+	THEROBOT->get_current_machine_position(mpos);
+	if(THEROBOT->compensationTransform) THEROBOT->compensationTransform(mpos, true); // get inverse compensation transform
+
+	Robot::wcs_t wpos = THEROBOT->mcs2wcs(mpos);
+	float curx = THEROBOT->from_millimeters(std::get<X_AXIS>(wpos));
+	float cury = THEROBOT->from_millimeters(std::get<Y_AXIS>(wpos));
+	float curz = THEROBOT->from_millimeters(std::get<Z_AXIS>(wpos));
+
+
+	// G39 V1 S225 N170 Z2 E-2 F6000
+
+	//if there is a standby temperature begin to cool down the current extruder
+	if (!isnan(standby_temp)) {
+		//			M104 S170 T0
+		n = snprintf(buf, sizeof(buf), "M104 S%1.4f T%d", standby_temp, old_toolnum);
+		Gcode gc(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+	}
+
+	//begin to heat up the new extruder
+	if (!isnan(new_temp)) {
+//			M104 S[extruder1_temperature] T1
+		n = snprintf(buf, sizeof(buf), "M104 S%1.4f T%d", new_temp, toolnum);
+		Gcode gc(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+	}
+
+	// set the hotends to the neutral position
+	set_sensor_position(gcode, 0, S_NEUTRAL);
+	set_sensor_position(gcode, 1, S_NEUTRAL);
+
+	// lift up a bit
+	if (z_hop > 0) {
+//			G91
+//			G0 Z2 F200
+//			G90
+		Gcode gc2("G91", gcode->stream);
+		gcode->stream->printf("G91\n");
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc2);
+		n = snprintf(buf, sizeof(buf), "G0 Z%1.4f F200", z_hop);
+		Gcode gc3(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc3);
+		Gcode gc4("G90", gcode->stream);
+		gcode->stream->printf("G90\n");
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc4);
+	}
+
+
+	// move to a ooze control point
+	if (!isnan(ooze_pos[0])) {
+		//HACKHACK the ooze position is relative to the left hotend.  We need to make sure we are in the right coordinate system
+		int active_tool = get_active_tool();
+
+		if (active_tool > 0) {
+			Gcode gc10("T0", gcode->stream);
+			gcode->stream->printf("T0\n");
+			THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc10);
+		}
+
+		n = snprintf(buf, sizeof(buf), "G0 X%1.4f Y%1.4f F%1.4f\n", ooze_pos[0], ooze_pos[1], speed);
+		Gcode gc3(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc3);
+
+		if (active_tool > 0) {
+			Gcode gc10("T1", gcode->stream);
+			gcode->stream->printf("T1\n");
+			THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc10);
+		}
+	}
+
+	//begin to heat up the new extruder
+	if (!isnan(new_temp)) {
+//			M109 S[extruder1_temperature] T1
+		n = snprintf(buf, sizeof(buf), "M109 S%1.4f T%d", new_temp, toolnum);
+		Gcode gc(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+	}
+
+	//select the new tool
+//		M506 T1; set active offset for T0
+//		T1 P0 ; select tool
+	n = snprintf(buf, sizeof(buf), "M506 T%d", toolnum);
+	Gcode gc4(buf, gcode->stream);
+	gcode->stream->printf("%s\n",buf);
+	THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc4);
+	n = snprintf(buf, sizeof(buf), "T%d P0", toolnum);
+	Gcode gc5(buf, gcode->stream);
+	gcode->stream->printf("%s\n",buf);
+	THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc5);
+
+	//lift up the old head and lock the new tool in place
+	set_sensor_position(gcode, old_toolnum, S_RAISED);
+	set_sensor_position(gcode, toolnum, S_LOWERED);
+
+	//retract
+	if (retract != 0) {
+//			G1 E-2 F1200
+		n = snprintf(buf, sizeof(buf), "G1 E%1.4f F1200", retract);
+		Gcode gc3(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc3);
+	}
+
+/* not needed?
+
+	//this doesn't really help...and actually can cause dripping on the wrong colors
+
+	//move back to the current position while still raised.  That way we don't nick the front of the print with an oozey nozzle
+	n = snprintf(buf, sizeof(buf), "G0 X%1.4f Y%1.4f F%1.4f\n", curx, cury, speed);
+	Gcode gc7(buf, gcode->stream);
+	gcode->stream->printf("%s\n",buf);
+	THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc7);
+
+	//this is definitely not needed...the generated gcode following this includes the new Z height, so this is redundant.
+	//lift back up
+	if (z_hop > 0) {
+		n = snprintf(buf, sizeof(buf), "G0 Z%1.4f F200", curz);
+		Gcode gc3(buf, gcode->stream);
+		gcode->stream->printf("%s\n",buf);
+		THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc3);
+	}
+*/
 }
 
 
@@ -1080,6 +1241,9 @@ void ZProbe::on_gcode_received(void *argument)
         }
 
         return;
+	} else if(gcode->has_g && gcode->g == 39 ) { // fancy tool change with ooze control
+		ooze_toolchange(gcode);
+		return;
 	} else if(gcode->has_g && gcode->g == 28 ) { // watch for the homing command & initialize the CAM
 		if ((gcode->subcode != 1) && (gcode->subcode != 2) && (this->cam_pin != nullptr)) {
 			init_cam(gcode);
